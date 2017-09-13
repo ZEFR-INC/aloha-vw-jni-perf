@@ -1,2 +1,7 @@
 *.class
 *.log
+.idea/
+project/target/config-classes/$3fec4c2206d551c93ddb.cache
+project/target/scala-2.10/
+project/target/streams/compile/incCompileSetup/
+target/

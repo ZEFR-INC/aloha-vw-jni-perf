@@ -3,9 +3,8 @@ name := """aloha-vw-jni-perf"""
 version := "1.0-SNAPSHOT"
 
 libraryDependencies ++= Seq(
-  // Add your own project dependencies in the form:
-  // "group" % "artifact" % "version"
-  // add aloha core, aloha-vw-jni
+  "com.eharmony" % "aloha-core_2.11" % "5.0.1-SNAPSHOT",
+  "com.eharmony" % "aloha-vw-jni_2.11" % "5.0.1-SNAPSHOT"
 )
 
 enablePlugins(JmhPlugin)
