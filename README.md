@@ -15,7 +15,7 @@ $CLASSES
 
 EOD
 ) | $VW \
- -b 18 \
+ -b 23 \
  --ring_size 10010 \
  --csoaa_ldf mc \
  --csoaa_rank \
