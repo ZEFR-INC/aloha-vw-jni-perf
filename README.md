@@ -2,6 +2,9 @@
 Aloha VW JNI performance testing
 
 ```bash
+FEATURES=$(seq 1 100 | sed 's/^/f/g' | tr '\n' ' ')
+CLASSES=$(seq 1 10000 | sed 's/\(.*\)/\1:-1.0 |Y _C\1_/g')
+
 # Construct one example and feed to VW.  
 # Notice the ring_size needs to be about 10 more than the number of classes.
 (cat <<EOD
