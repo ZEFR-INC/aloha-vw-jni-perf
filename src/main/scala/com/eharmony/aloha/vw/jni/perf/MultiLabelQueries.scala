@@ -16,7 +16,6 @@ import vowpalWabbit.learner.{VWActionScoresLearner, VWLearners}
 import vowpalWabbit.responses.ActionScores
 
 import scala.collection.immutable
-import scala.util.Random
 
 @State(Scope.Thread)
 class MultiLabelQueries {
@@ -67,7 +66,7 @@ class MultiLabelQueries {
 
   @TearDown
   def tearDown(): Unit = {
-    // The file is not deleted because (we think) it is automatically deleted on JVM exit
+    // The file is not deleted manually because (we think) it is automatically deleted on JVM exit
     model.close()
     vwModel.close()
   }
@@ -144,8 +143,7 @@ object MultiLabelQueries {
   }
 
   private def getTrainedModel(nLabels: Int, bits: Int, trainingData: Array[String],
-    initialWeight: Double):
-  ModelSource = {
+    initialWeight: Double): ModelSource = {
     val modelFile = tmpFile()
     val params = vwArgs(modelFile, nLabels, bits, initialWeight)
     val learner = VWLearners.create[VWActionScoresLearner](params)
@@ -163,12 +161,6 @@ object MultiLabelQueries {
   )
 
   private val Auditor: OptionAuditor[Map[Label, Double]] = OptionAuditor[Map[Label, Double]]()
-
-  def createInitialWeight(seed: Long): Double = {
-    val random = new Random(seed)
-    val sign = if (random.nextFloat() > 0.5) 1 else -1
-    1e-6 + sign * random.nextFloat() * 1e-7
-  }
 
   def getModel(
     trainedModel: ModelSource,

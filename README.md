@@ -7,7 +7,7 @@ sbt
 ```
 - Warmup iterations: 20
 - Iterations: 20
-- Running all benchmarks
+- Running all benchmark modes
 
 ### 
 
