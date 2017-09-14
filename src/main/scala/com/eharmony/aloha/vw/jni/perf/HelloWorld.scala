@@ -15,6 +15,7 @@ import org.openjdk.jmh.annotations._
 import vowpalWabbit.learner.{VWActionScoresLearner, VWLearners}
 
 import scala.collection.immutable
+import scala.util.Random
 
 @State(Scope.Thread)
 class HelloWorld {
@@ -24,13 +25,15 @@ class HelloWorld {
 
   import HelloWorld._
 
+  @Param(Array("1", "2", "10", "50", "100", "200"))
+  var nLabelsQueried: Int = _
+
   private var model: Model[Domain, Option[Map[Label, Double]]] = _
 
   @Setup
   def prepare(): Unit = {
     val nFeatures = 20
     val nLabels = 200
-    val nLabelsQueried = 2
     val bits = 22
     model = getModel(nFeatures, nLabels, nLabelsQueried, bits)
   }
@@ -69,6 +72,10 @@ object HelloWorld {
   // Returns the VW args that should be used to train the VW model.
   // Ouputs the model to `dest`.
   def vwArgs(dest: java.io.File, nLabels: Int, bits: Int): String = {
+    val random = new Random()
+    val sign = if (random.nextFloat() > 0.5) 1 else -1
+    val initialWeight = 1e-6 + sign * random.nextFloat() * 1e-7
+
     Seq(
       s"-b $bits",
       s"--ring_size ${nLabels + 10}",
@@ -79,7 +86,7 @@ object HelloWorld {
       "--noconstant",
       "--ignore_linear X",
       "--ignore y",
-      "--initial_weight 0.000001",
+      s"--initial_weight $initialWeight",
       "-f " + dest.getCanonicalPath
     ).mkString(" ")
   }
