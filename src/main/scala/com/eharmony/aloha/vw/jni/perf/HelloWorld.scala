@@ -18,7 +18,7 @@ import scala.collection.immutable
 
 @State(Scope.Thread)
 class HelloWorld {
-  // TODO: vary: nFeatures, nLabels, nLabelsDesired, bits
+  // TODO: vary: nFeatures, nLabels, nLabelsQueried, bits
   // TODO: JMH docs, warmups, multiple iterations on multiple JVMs
   // TODO: be wary of JVM caching, set this initial_weight 0.000001 randomly
 
@@ -27,7 +27,13 @@ class HelloWorld {
   private var model: Model[Domain, Option[Map[Label, Double]]] = _
 
   @Setup
-  def prepare(): Unit = model = getModel
+  def prepare(): Unit = {
+    val nFeatures = 20
+    val nLabels = 200
+    val nLabelsQueried = 2
+    val bits = 22
+    model = getModel(nFeatures, nLabels, nLabelsQueried, bits)
+  }
 
   @Benchmark
   def helloWorld(): Unit = {
@@ -41,7 +47,6 @@ class HelloWorld {
 }
 
 object HelloWorld {
-
   type Domain = Any
   type Label = Int
 
@@ -89,26 +94,21 @@ object HelloWorld {
   //
   // for any type `A`
   //
-  def featureFns(nFeatures: Int): (Vector[String], Vector[GenAggFunc[Any, Iterable[(String, Double)]]]) = {
+  private def featureFns(
+    nFeatures: Int
+  ): (Vector[String], Vector[GenAggFunc[Any, Iterable[(String, Double)]]]) = {
     val names = getFeatureNames(nFeatures).toVector
     val fns = Vector.fill(nFeatures)(EmptyIndicatorFn)
     (names, fns)
   }
-
-
 
   // GenAggFunc is contravariant in its input and covariant in its output
   // so this could be the following for any A, without casting:
   //
   //   GenAggFunc[A, sci.IndexedSeq[K]]
   //
-  def labelExtractor[K](labels: Vector[K]): GenAggFunc[Any, Vector[K]] =
+  private def labelExtractor[K](labels: Vector[K]): GenAggFunc[Any, Vector[K]] =
   GenFunc0("[the labels]", (_: Any) => labels)
-
-  private val nFeatures = 20
-  private val nLabels = 200
-  private val nLabelsDesired = 1
-  private val bits = 22
 
   private def tmpFile() = {
     val f = File.createTempFile(classOf[HelloWorld].getSimpleName + "_", ".vw.model")
@@ -116,23 +116,19 @@ object HelloWorld {
     f
   }
 
-  private val trainingData = vwTrainingExample(nFeatures, nLabels)
-
-  def trainedModel(): ModelSource = {
+  private def getTrainedModel(nLabels: Int, bits: Int, trainingData: Array[String]): ModelSource = {
     val modelFile = tmpFile()
     val params = vwArgs(modelFile, nLabels, bits)
     println(params)
     val learner = VWLearners.create[VWActionScoresLearner](params)
-
     learner.learn(trainingData)
-
     learner.close()
-
     ExternalSource(Vfs.javaFileToAloha(modelFile))
   }
 
-  def predProd(): VwSparseMultilabelPredictorProducer[Label] = VwSparseMultilabelPredictorProducer[Label](
-    modelSource = trainedModel(),
+  private def predProd(trainedModel: ModelSource): VwSparseMultilabelPredictorProducer[Label] =
+    VwSparseMultilabelPredictorProducer[Label](
+    modelSource = trainedModel,
     params      = "", // to see the output:  "-p /dev/stdout",
     defaultNs   = List.empty[Int],
     namespaces  = List(("X", List(0)))
@@ -140,7 +136,15 @@ object HelloWorld {
 
   private val Auditor: OptionAuditor[Map[Label, Double]] = OptionAuditor[Map[Label, Double]]()
 
-  def getModel: Model[Domain, Option[Map[Label, Double]]] = {
+  def getModel(
+    nFeatures: Int,
+    nLabels: Int,
+    nLabelsQueried: Int,
+    bits: Int
+  ): Model[Domain, Option[Map[Label, Double]]] = {
+    val trainingData: Array[String] = vwTrainingExample(nFeatures, nLabels)
+    val trainedModel: ModelSource = getTrainedModel(nLabels, bits, trainingData)
+
     val (featureNames, features) = featureFns(nFeatures)
     val featureFuctions: Vector[GenAggFunc[Domain, Sparse]] = features
 
@@ -149,8 +153,8 @@ object HelloWorld {
       featureNames,
       featureFuctions,
       getLabels(nLabels),
-      Option(labelExtractor(getLabels(nLabelsDesired))),
-      predProd(),
+      Option(labelExtractor(getLabels(nLabelsQueried))),
+      predProd(trainedModel),
       Option.empty[Int],
       Auditor
     )
