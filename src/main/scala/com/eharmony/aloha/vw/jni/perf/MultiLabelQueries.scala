@@ -34,12 +34,12 @@ class MultiLabelQueries {
   private var bits: Int = _
 
   @Param(Array("1e-5", "1e-6"))
-  private var initialWeights: Long = _
+  private var initialWeights: Double = _
 
   private var model: Model[Domain, Option[Map[Label, Double]]] = _
   private var vwModel: VWActionScoresLearner = _
   private var vwTestExample: Array[String] = _
-  private var alohaTestExample = _
+  private var alohaTestExample: Any = _
 
   @Setup
   def prepare(): Unit = {
