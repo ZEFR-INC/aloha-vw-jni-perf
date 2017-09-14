@@ -20,9 +20,6 @@ import scala.util.Random
 
 @State(Scope.Thread)
 class MultiLabelQueries {
-  // TODO: JMH docs, warmups, multiple iterations on multiple JVMs
-  // TODO: be wary of JVM caching, set this initial_weight 0.000001 randomly
-
   import MultiLabelQueries._
 
   @Param(Array("200", "500", "1000"))
@@ -37,20 +34,21 @@ class MultiLabelQueries {
   @Param(Array("20", "22"))
   private var bits: Int = _
 
-  @Param(Array("11212312442", "21215497853"))
-  private var seed: Long = _
+  @Param(Array("1e-5", "1e-6"))
+  private var initialWeights: Long = _
 
   private var model: Model[Domain, Option[Map[Label, Double]]] = _
   private var vwModel: VWActionScoresLearner = _
   private var vwTestExample: Array[String] = _
+  private var alohaTestExample = _
 
   @Setup
   def prepare(): Unit = {
     val trainingData: Array[String] = vwTrainingExample(nFeatures, nLabels)
-    val initialWeight = createInitialWeight(seed)
-    val trainedModel: ModelSource = getTrainedModel(nLabels, bits, trainingData, initialWeight)
+    val trainedModel: ModelSource = getTrainedModel(nLabels, bits, trainingData, initialWeights)
     val vwModelParams = "-t --quiet -i " + trainedModel.localVfs.descriptor
     val nLabelsQueried = math.round(nLabelsQueriedPercentage * nLabels).toInt
+    alohaTestExample = null
     model = getModel(trainedModel, nFeatures, nLabels, nLabelsQueried)
     vwModel = VWLearners.create[VWActionScoresLearner](vwModelParams)
 
@@ -62,7 +60,7 @@ class MultiLabelQueries {
   }
 
   @Benchmark
-  def aloha(): Option[Map[Label, Double]] = model(null)
+  def aloha(): Option[Map[Label, Double]] = model(alohaTestExample)
 
   @Benchmark
   def vw(): ActionScores = vwModel.predict(vwTestExample)
@@ -98,8 +96,6 @@ object MultiLabelQueries {
   // Returns the VW args that should be used to train the VW model.
   // Ouputs the model to `dest`.
   def vwArgs(dest: java.io.File, nLabels: Int, bits: Int, initialWeight: Double): String = {
-
-
     Seq(
       s"-b $bits",
       s"--ring_size ${nLabels + 10}",
