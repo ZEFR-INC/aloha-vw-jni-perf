@@ -13,43 +13,69 @@ import com.eharmony.aloha.models.vw.jni.multilabel.VwSparseMultilabelPredictorPr
 import com.eharmony.aloha.semantics.func.{GenAggFunc, GenFunc0}
 import org.openjdk.jmh.annotations._
 import vowpalWabbit.learner.{VWActionScoresLearner, VWLearners}
+import vowpalWabbit.responses.ActionScores
 
 import scala.collection.immutable
 import scala.util.Random
 
 @State(Scope.Thread)
-class HelloWorld {
-  // TODO: vary: nFeatures, nLabels, nLabelsQueried, bits
+class MultiLabelQueries {
   // TODO: JMH docs, warmups, multiple iterations on multiple JVMs
   // TODO: be wary of JVM caching, set this initial_weight 0.000001 randomly
 
-  import HelloWorld._
+  import MultiLabelQueries._
 
-  @Param(Array("1", "2", "10", "50", "100", "200"))
-  var nLabelsQueried: Int = _
+  @Param(Array("200", "500", "1000"))
+  private var nLabels: Int = _
+
+  @Param(Array("0.01", "0.1", "0.5", "1"))
+  private var nLabelsQueriedPercentage: Double = _
+
+  @Param(Array("10", "50", "100"))
+  private var nFeatures: Int = _
+
+  @Param(Array("20", "22"))
+  private var bits: Int = _
+
+  @Param(Array("11212312442", "21215497853"))
+  private var seed: Long = _
 
   private var model: Model[Domain, Option[Map[Label, Double]]] = _
+  private var vwModel: VWActionScoresLearner = _
+  private var vwTestExample: Array[String] = _
 
   @Setup
   def prepare(): Unit = {
-    val nFeatures = 20
-    val nLabels = 200
-    val bits = 22
-    model = getModel(nFeatures, nLabels, nLabelsQueried, bits)
+    val trainingData: Array[String] = vwTrainingExample(nFeatures, nLabels)
+    val initialWeight = createInitialWeight(seed)
+    val trainedModel: ModelSource = getTrainedModel(nLabels, bits, trainingData, initialWeight)
+    val vwModelParams = "-t --quiet -i " + trainedModel.localVfs.descriptor
+    val nLabelsQueried = math.round(nLabelsQueriedPercentage * nLabels).toInt
+    model = getModel(trainedModel, nFeatures, nLabels, nLabelsQueried)
+    vwModel = VWLearners.create[VWActionScoresLearner](vwModelParams)
+
+    // Keep the shared features and the first nLabelsQueried
+    // The format is:
+    // shared features on first line, 2 dummy labels on the next two lines (so we can drop 3)
+    // and then the labels
+    vwTestExample = trainingData(0) +: trainingData.slice(3, nLabelsQueried + 3)
   }
 
   @Benchmark
-  def helloWorld(): Unit = {
-    model(null)
-  }
+  def aloha(): Option[Map[Label, Double]] = model(null)
+
+  @Benchmark
+  def vw(): ActionScores = vwModel.predict(vwTestExample)
 
   @TearDown
   def tearDown(): Unit = {
+    // The file is not deleted because (we think) it is automatically deleted on JVM exit
     model.close()
+    vwModel.close()
   }
 }
 
-object HelloWorld {
+object MultiLabelQueries {
   type Domain = Any
   type Label = Int
 
@@ -71,10 +97,8 @@ object HelloWorld {
 
   // Returns the VW args that should be used to train the VW model.
   // Ouputs the model to `dest`.
-  def vwArgs(dest: java.io.File, nLabels: Int, bits: Int): String = {
-    val random = new Random()
-    val sign = if (random.nextFloat() > 0.5) 1 else -1
-    val initialWeight = 1e-6 + sign * random.nextFloat() * 1e-7
+  def vwArgs(dest: java.io.File, nLabels: Int, bits: Int, initialWeight: Double): String = {
+
 
     Seq(
       s"-b $bits",
@@ -117,16 +141,17 @@ object HelloWorld {
   private def labelExtractor[K](labels: Vector[K]): GenAggFunc[Any, Vector[K]] =
   GenFunc0("[the labels]", (_: Any) => labels)
 
-  private def tmpFile() = {
-    val f = File.createTempFile(classOf[HelloWorld].getSimpleName + "_", ".vw.model")
+  private def tmpFile(): File = {
+    val f = File.createTempFile(classOf[MultiLabelQueries].getSimpleName + "_", ".vw.model")
     f.deleteOnExit()
     f
   }
 
-  private def getTrainedModel(nLabels: Int, bits: Int, trainingData: Array[String]): ModelSource = {
+  private def getTrainedModel(nLabels: Int, bits: Int, trainingData: Array[String],
+    initialWeight: Double):
+  ModelSource = {
     val modelFile = tmpFile()
-    val params = vwArgs(modelFile, nLabels, bits)
-    println(params)
+    val params = vwArgs(modelFile, nLabels, bits, initialWeight)
     val learner = VWLearners.create[VWActionScoresLearner](params)
     learner.learn(trainingData)
     learner.close()
@@ -143,22 +168,25 @@ object HelloWorld {
 
   private val Auditor: OptionAuditor[Map[Label, Double]] = OptionAuditor[Map[Label, Double]]()
 
+  def createInitialWeight(seed: Long): Double = {
+    val random = new Random(seed)
+    val sign = if (random.nextFloat() > 0.5) 1 else -1
+    1e-6 + sign * random.nextFloat() * 1e-7
+  }
+
   def getModel(
+    trainedModel: ModelSource,
     nFeatures: Int,
     nLabels: Int,
-    nLabelsQueried: Int,
-    bits: Int
+    nLabelsQueried: Int
   ): Model[Domain, Option[Map[Label, Double]]] = {
-    val trainingData: Array[String] = vwTrainingExample(nFeatures, nLabels)
-    val trainedModel: ModelSource = getTrainedModel(nLabels, bits, trainingData)
-
     val (featureNames, features) = featureFns(nFeatures)
-    val featureFuctions: Vector[GenAggFunc[Domain, Sparse]] = features
+    val featureFunctions: Vector[GenAggFunc[Domain, Sparse]] = features
 
     MultilabelModel(
       ModelId(1, "model"),
       featureNames,
-      featureFuctions,
+      featureFunctions,
       getLabels(nLabels),
       Option(labelExtractor(getLabels(nLabelsQueried))),
       predProd(trainedModel),
