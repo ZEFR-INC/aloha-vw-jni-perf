@@ -17,9 +17,15 @@ import vowpalWabbit.responses.ActionScores
 
 import scala.collection.immutable
 
+/**
+  * Test the model performance of Aloha's MultilabelModel and the underlying VW JNI model.
+  * @author amir.ziai, ryan.deak
+  */
 @State(Scope.Thread)
 class MultiLabelQueries {
   import MultiLabelQueries._
+
+  // =========================   JMH TEST PARAMS   =========================
 
   @Param(Array("200", "500", "1000"))
   private var nLabels: Int = _
@@ -36,6 +42,9 @@ class MultiLabelQueries {
   @Param(Array("1e-5", "1e-6"))
   private var initialWeights: Double = _
 
+
+  // =========================   STATE VARIABLES   =========================
+
   private var model: Model[Domain, Option[Map[Label, Double]]] = _
   private var vwModel: VWActionScoresLearner = _
   private var vwTestExample: Array[String] = _
@@ -45,24 +54,19 @@ class MultiLabelQueries {
   def prepare(): Unit = {
     val trainingData: Array[String] = vwTrainingExample(nFeatures, nLabels)
     val trainedModel: ModelSource = getTrainedModel(nLabels, bits, trainingData, initialWeights)
-    val vwModelParams = "-t --quiet -i " + trainedModel.localVfs.descriptor
     val nLabelsQueried = math.round(nLabelsQueriedPercentage * nLabels).toInt
+    val vwModelParams = s"--ring_size ${nLabels + 5} -t --quiet -i " + trainedModel.localVfs.descriptor
+
+    // Update the state.
+
     alohaTestExample = null
     model = getModel(trainedModel, nFeatures, nLabels, nLabelsQueried)
     vwModel = VWLearners.create[VWActionScoresLearner](vwModelParams)
 
-    // Keep the shared features and the first nLabelsQueried
-    // The format is:
-    // shared features on first line, 2 dummy labels on the next two lines (so we can drop 3)
-    // and then the labels
+    // Dummy labels are not necessary for prediction.
+    // Keep the shared features and the labels, but remove the dummy labels.
     vwTestExample = trainingData(0) +: trainingData.slice(3, nLabelsQueried + 3)
   }
-
-  @Benchmark
-  def aloha(): Option[Map[Label, Double]] = model(alohaTestExample)
-
-  @Benchmark
-  def vw(): ActionScores = vwModel.predict(vwTestExample)
 
   @TearDown
   def tearDown(): Unit = {
@@ -70,32 +74,54 @@ class MultiLabelQueries {
     model.close()
     vwModel.close()
   }
+
+
+  // ============================   BENCHMARKS   ===========================
+
+  /**
+    * Use Aloha to predict one example.
+    * @return Aloha prediction output.
+    */
+  @Benchmark
+  def aloha(): Option[Map[Label, Double]] = model(alohaTestExample)
+
+  /**
+    * Use VW JNI to predict one example.
+    * @return VW JNI prediction output.
+    */
+  @Benchmark
+  def vw(): ActionScores = vwModel.predict(vwTestExample)
 }
 
 object MultiLabelQueries {
-  type Domain = Any
-  type Label = Int
 
-  def getFeatureNames(nFeatures: Int): immutable.IndexedSeq[String]  = (1 to nFeatures).map(i => s"f$i")
+  /**
+    * The model doesn't need to use the input because the label extractor returns a constant
+    * list of labels once the model is constructed.
+    */
+  private type Domain = Any
 
-  def getLabels(nLabels: Int): Vector[Label] = (1 to nLabels).toVector
+  /**
+    * Use `Int` labels to make them as simple as possible.  We don't care about the actual
+    * label values.
+    */
+  private type Label = Int
 
-  // Returns a training line that can be passed to VW to train a model.
-  def vwTrainingExample(nFeatures: Int, nLabels: Int): Array[String] = {
-    val features = getFeatureNames(nFeatures).mkString(" ")
-    val labels = (1 to nLabels).map(i => s"$i:-1 |Y _$i")
-    val dummyLabels = Seq(
-      "2147483648:0 |y _neg_",
-      "2147483649:-1 |y _pos_"
-    )
+  /**
+    * Change this to show VW output while training the model.
+    */
+  private[this] val ShowVwDiagnostics: Boolean = false
 
-    Array(s"shared |X $features") ++ dummyLabels ++ labels
-  }
+  private[this] def getFeatureNames(nFeatures: Int): immutable.IndexedSeq[String] =
+    (1 to nFeatures).map(i => s"f$i")
+
+  private[this] def getLabels(nLabels: Int): Vector[Label] = (1 to nLabels).toVector
 
   // Returns the VW args that should be used to train the VW model.
   // Ouputs the model to `dest`.
-  def vwArgs(dest: java.io.File, nLabels: Int, bits: Int, initialWeight: Double): String = {
+  private[this] def vwArgs(dest: File, nLabels: Int, bits: Int, initialWeight: Double): String = {
     Seq(
+      if (ShowVwDiagnostics) "" else "--quiet",
       s"-b $bits",
       s"--ring_size ${nLabels + 10}",
       "--csoaa_ldf mc",
@@ -107,11 +133,12 @@ object MultiLabelQueries {
       "--ignore y",
       s"--initial_weight $initialWeight",
       "-f " + dest.getCanonicalPath
-    ).mkString(" ")
+    ).mkString(" ").trim
   }
 
   // Create one feature that can be used over and over.
-  val EmptyIndicatorFn = GenFunc0("""Iterable(("", 1d))""", (_: Any) => Iterable(("", 1d)))
+  private[this] val EmptyIndicatorFn =
+    GenFunc0("""Iterable(("", 1d))""", (_: Any) => Iterable(("", 1d)))
 
   // Create feature names and feature functions that can be passed to the MultilabelModel.
   // Since Vector is covariant and GenAggFunc's input is contravariant, this could be
@@ -120,7 +147,7 @@ object MultiLabelQueries {
   //
   // for any type `A`
   //
-  private def featureFns(
+  private[this] def featureFns(
     nFeatures: Int
   ): (Vector[String], Vector[GenAggFunc[Any, Iterable[(String, Double)]]]) = {
     val names = getFeatureNames(nFeatures).toVector
@@ -133,17 +160,62 @@ object MultiLabelQueries {
   //
   //   GenAggFunc[A, sci.IndexedSeq[K]]
   //
-  private def labelExtractor[K](labels: Vector[K]): GenAggFunc[Any, Vector[K]] =
-  GenFunc0("[the labels]", (_: Any) => labels)
+  private[this] def labelExtractor[K](labels: Vector[K]): GenAggFunc[Any, Vector[K]] =
+    GenFunc0("[the labels]", (_: Any) => labels)
 
-  private def tmpFile(): File = {
+  private[this] def tmpFile(): File = {
     val f = File.createTempFile(classOf[MultiLabelQueries].getSimpleName + "_", ".vw.model")
     f.deleteOnExit()
     f
   }
 
-  private def getTrainedModel(nLabels: Int, bits: Int, trainingData: Array[String],
-    initialWeight: Double): ModelSource = {
+  private[this] def predictorProducer(
+      trainedModel: ModelSource,
+      nLabels: Int
+  ): VwSparseMultilabelPredictorProducer[Label] =
+    VwSparseMultilabelPredictorProducer[Label](
+    modelSource = trainedModel,
+    params      = s"--ring_size ${nLabels + 10}", // to see the output:  "-p /dev/stdout",
+    defaultNs   = List.empty[Int],
+    namespaces  = List(("X", List(0)))
+  )
+
+  /**
+    * Use an OptionAuditor because it offers highest performance.  It returns the least amount of
+    * extraneous information.
+    */
+  private[this] val Auditor: OptionAuditor[Map[Label, Double]] = OptionAuditor[Map[Label, Double]]()
+
+
+  /**
+    * The training data format is:
+    *
+    - ''index 0'': shared features
+    - ''index 1'': negative dummy example (necessary to normalize probs correctly)
+    - ''index 2'': positive dummy example (necessary to normalize probs correctly)
+    - ''indices 3 ... nLabels + 3 (exclusive)'': label-based features.
+    *
+    * @param nFeatures number of shared features to add to the example.
+    * @param nLabels number of labels to add to the example.
+    * @return a training line that can be passed to VW to train a model.
+    */
+  private def vwTrainingExample(nFeatures: Int, nLabels: Int): Array[String] = {
+    val features = getFeatureNames(nFeatures).mkString(" ")
+    val labels = (1 to nLabels).map(i => s"$i:-1 |Y _$i")
+    val dummyLabels = Seq(
+      "2147483648:0 |y _neg_",
+      "2147483649:-1 |y _pos_"
+    )
+
+    Array(s"shared |X $features") ++ dummyLabels ++ labels
+  }
+
+  private def getTrainedModel(
+      nLabels: Int,
+      bits: Int,
+      trainingData: Array[String],
+      initialWeight: Double
+  ): ModelSource = {
     val modelFile = tmpFile()
     val params = vwArgs(modelFile, nLabels, bits, initialWeight)
     val learner = VWLearners.create[VWActionScoresLearner](params)
@@ -152,32 +224,21 @@ object MultiLabelQueries {
     ExternalSource(Vfs.javaFileToAloha(modelFile))
   }
 
-  private def predProd(trainedModel: ModelSource): VwSparseMultilabelPredictorProducer[Label] =
-    VwSparseMultilabelPredictorProducer[Label](
-    modelSource = trainedModel,
-    params      = "", // to see the output:  "-p /dev/stdout",
-    defaultNs   = List.empty[Int],
-    namespaces  = List(("X", List(0)))
-  )
-
-  private val Auditor: OptionAuditor[Map[Label, Double]] = OptionAuditor[Map[Label, Double]]()
-
-  def getModel(
+  private def getModel(
     trainedModel: ModelSource,
     nFeatures: Int,
     nLabels: Int,
     nLabelsQueried: Int
   ): Model[Domain, Option[Map[Label, Double]]] = {
     val (featureNames, features) = featureFns(nFeatures)
-    val featureFunctions: Vector[GenAggFunc[Domain, Sparse]] = features
 
     MultilabelModel(
       ModelId(1, "model"),
       featureNames,
-      featureFunctions,
+      features,
       getLabels(nLabels),
       Option(labelExtractor(getLabels(nLabelsQueried))),
-      predProd(trainedModel),
+      predictorProducer(trainedModel, nLabels),
       Option.empty[Int],
       Auditor
     )
