@@ -1,6 +1,13 @@
 # Aloha VW JNI performance benchmark
 
-Usage
+### Results
+![Aloha VW JNI Performance Benchmark][throughput]
+
+[throughput]: resources/aloha_perf.png
+
+As expected throughput is a function of number of labels queried and not the total number of labels used for training.
+
+### Usage
 ```bash
 sbt
 > jmh:run -wi 10 -i 10
