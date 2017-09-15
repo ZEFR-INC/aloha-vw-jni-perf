@@ -79,14 +79,14 @@ class MultiLabelQueries {
   // ============================   BENCHMARKS   ===========================
 
   /**
-    * Use Aloha to prediction one example.
+    * Use Aloha to predict one example.
     * @return Aloha prediction output.
     */
   @Benchmark
   def aloha(): Option[Map[Label, Double]] = model(alohaTestExample)
 
   /**
-    * Use VW JNI to prediction one example.
+    * Use VW JNI to predict one example.
     * @return VW JNI prediction output.
     */
   @Benchmark
