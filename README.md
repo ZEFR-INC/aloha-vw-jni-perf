@@ -3,11 +3,11 @@
 Usage
 ```bash
 sbt
-> jmh:run -bm all
+> jmh:run -wi 10 -i 10
 ```
-- Warmup iterations: 20
-- Iterations: 20
-- Running all benchmark modes
+- Warmup iterations: 10
+- Iterations: 10
+- Running throughput benchmark
 
 ### 
 
