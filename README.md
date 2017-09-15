@@ -23,7 +23,7 @@ spent in an Aloha prediction becomes dominated by the actual VW prediction.
 
 ### Raw Data
 
-[Benchmark data][data] was generated on Ubuntu 16.04 on a [3930K](http://ark.intel.com/products/63697/Intel-Core-i7-3930K-Processor-12M-Cache-up-to-3_80-GHz)
+[Benchmark data][data] was generated on Ubuntu 16.04 on a [Core i7 3930K](http://ark.intel.com/products/63697/Intel-Core-i7-3930K-Processor-12M-Cache-up-to-3_80-GHz)
 using `jmh:run -wi 10 -i 10 -t 1 -f 1`.
 
 [data]: resources/bench_data_3930k.tsv
